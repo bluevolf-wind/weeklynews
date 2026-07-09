@@ -8,6 +8,7 @@ import os
 import re
 import json
 import time
+import difflib
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
@@ -139,6 +140,38 @@ def pubmed_recent(term):
         return []
 
 
+def _norm_title(t):
+    """제목 정규화: 소문자화, 끝의 '- 매체명' 제거, 문장부호 제거."""
+    t = t.lower()
+    t = re.split(r"\s[-|·–]\s", t)[0]          # ' - 의학신문' 같은 매체 꼬리표 제거
+    t = re.sub(r"[^0-9a-z가-힣\s]", " ", t)    # 문장부호·따옴표 제거
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _title_similarity(a, b):
+    """두 제목의 유사도(0~1). 단어 겹침과 글자 유사도 중 큰 값."""
+    na, nb = _norm_title(a), _norm_title(b)
+    if not na or not nb:
+        return 0.0
+    sa, sb = set(na.split()), set(nb.split())
+    jaccard = len(sa & sb) / len(sa | sb) if (sa | sb) else 0.0   # 단어 겹침
+    seq = difflib.SequenceMatcher(None, na, nb).ratio()          # 글자 배열 유사도
+    return max(jaccard, seq)
+
+
+def dedup_by_title(items, threshold=0.6):
+    """제목이 threshold 이상 비슷하면 같은 사건으로 보고 대표 1건만 유지."""
+    kept = []
+    for it in items:
+        dup = next((k for k in kept
+                    if _title_similarity(it["title"], k["title"]) >= threshold), None)
+        if dup is None:
+            kept.append(it)
+        elif len(it.get("snippet", "")) > len(dup.get("snippet", "")):
+            kept[kept.index(dup)] = it   # 더 상세한(스니펫 긴) 기사를 대표로 교체
+    return kept
+
+
 def collect_topic(topic, seen):
     """한 주제의 뉴스+임상을 모아 중복 제거."""
     raw = []
@@ -152,6 +185,7 @@ def collect_topic(topic, seen):
         raw += pubmed_recent(topic["pubmed"])
         time.sleep(1)
 
+    # 1차: 완전히 같은 URL 제거 (과거·이번 수집 내)
     uniq, local = [], set()
     for it in raw:
         key = it["link"]
@@ -159,6 +193,9 @@ def collect_topic(topic, seen):
             continue
         local.add(key)
         uniq.append(it)
+
+    # 2차: URL은 달라도 제목이 비슷한 같은 사건 묶기
+    uniq = dedup_by_title(uniq)
     return uniq[:MAX_ITEMS_PER_TOPIC]
 
 
