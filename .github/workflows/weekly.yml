@@ -1,0 +1,36 @@
+name: Weekly Topics Digest
+
+on:
+  schedule:
+    - cron: "0 0 * * 4"     # 매주 목요일 00:00 UTC = 한국시간 목요일 오전 9시
+  workflow_dispatch:          # 수동 실행 버튼 (테스트용)
+
+permissions:
+  contents: write             # seen_urls.json 커밋을 위해 필요
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run digest
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python main.py
+
+      - name: Commit seen list
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_urls.json
+          git commit -m "chore: update seen URLs" || echo "변경 없음"
+          git push
