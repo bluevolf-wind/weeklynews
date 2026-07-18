@@ -26,7 +26,9 @@ GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
 )
-SLACK_WEBHOOK_URL = os.environ["SLACK_WEBHOOK_URL"]
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
+# DRY_RUN=1 이면 Slack에 올리지 않고 로그로만 결과 확인 (채널 도배 방지)
+DRY_RUN = os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes")
 NCBI_EMAIL = os.environ.get("NCBI_EMAIL", "example@example.com")
 
 NEWS_PER_QUERY = 6          # 검색어당 가져올 뉴스 수
@@ -81,11 +83,28 @@ def google_news(query, lang="en"):
     else:
         base = "hl=en-US&gl=US&ceid=US:en"
     url = f"https://news.google.com/rss/search?q={quote(query)}+when:7d&{base}"
+    # feedparser 기본 요청은 구글이 차단함 → 브라우저처럼 요청한 뒤 내용만 파싱
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/126.0.0.0 Safari/537.36"),
+        "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    }
     try:
-        feed = feedparser.parse(url)
+        r = requests.get(url, headers=headers, timeout=30)
+        if r.status_code != 200:
+            print(f"  ! 뉴스 요청 실패({query}): HTTP {r.status_code}")
+            return []
+        feed = feedparser.parse(r.content)
     except Exception as e:
-        print(f"뉴스 검색 오류({query}): {e}")
+        print(f"  ! 뉴스 검색 오류({query}): {e}")
         return []
+
+    if not feed.entries:
+        print(f"  · '{query}' → 0건 (응답 {len(r.content)}바이트)")
+    else:
+        print(f"  · '{query}' → {len(feed.entries)}건")
 
     items = []
     for e in feed.entries[:NEWS_PER_QUERY]:
@@ -187,16 +206,24 @@ def collect_topic(topic, seen):
 
     # 1차: 완전히 같은 URL 제거 (과거·이번 수집 내)
     uniq, local = [], set()
+    skipped_seen = 0
     for it in raw:
         key = it["link"]
-        if not key or key in seen or key in local:
+        if not key:
+            continue
+        if key in seen:
+            skipped_seen += 1
+            continue
+        if key in local:
             continue
         local.add(key)
         uniq.append(it)
 
     # 2차: URL은 달라도 제목이 비슷한 같은 사건 묶기
-    uniq = dedup_by_title(uniq)
-    return uniq[:MAX_ITEMS_PER_TOPIC]
+    after_title = dedup_by_title(uniq)
+    print(f"  → 수집 {len(raw)}건 / 기존중복 제외 {skipped_seen}건 "
+          f"/ URL중복 제거 후 {len(uniq)}건 / 제목중복 제거 후 {len(after_title)}건")
+    return after_title[:MAX_ITEMS_PER_TOPIC]
 
 
 # ---------- Gemini 선별·요약 ----------
@@ -295,16 +322,33 @@ def main():
 
     sections, posted = [], []
     for topic in TOPICS:
+        print(f"\n[{topic['name']}]")
         items = collect_topic(topic, seen)
         if not items:
-            print(f"[{topic['name']}] 새 후보 없음")
+            print("  ⇒ 새 후보 없음")
             continue
         picks = curate(topic["name"], items)
         if not picks:
-            print(f"[{topic['name']}] 선별 결과 없음")
+            print("  ⇒ 선별 결과 없음 (Gemini가 모두 제외)")
             continue
+        print(f"  ⇒ 최종 {len(picks)}건 선정")
         sections.append((topic["name"], picks))
         posted += [it["link"] for it, _ in picks]
+
+    if DRY_RUN:
+        print("\n" + "=" * 50)
+        print("DRY RUN — Slack에 올리지 않고 결과만 출력합니다")
+        print("=" * 50)
+        for name, picks in sections:
+            print(f"\n■ {name}")
+            for it, summary in picks:
+                print(f"  • {it['title']}  ({it['source']})")
+                print(f"    {summary}")
+                print(f"    {it['link']}")
+        if not sections:
+            print("\n(올릴 소식 없음)")
+        print("\nDRY RUN이므로 seen 목록도 저장하지 않습니다.")
+        return
 
     if sections:
         post_to_slack(sections)
