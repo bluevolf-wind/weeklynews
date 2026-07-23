@@ -7,6 +7,7 @@ Gemini가 선별·요약한 뒤 매주 목요일 Slack에 업로드하는 스크
 import os
 import re
 import json
+import html
 import time
 import difflib
 import xml.etree.ElementTree as ET
@@ -316,6 +317,88 @@ def post_to_slack(sections):
         resp.raise_for_status()
 
 
+# ---------- 웹페이지 ----------
+def write_html(sections):
+    """docs/index.html 생성 (GitHub Pages로 게시됨)."""
+    kst = timezone(timedelta(hours=9))
+    now = datetime.now(kst)
+    date_label = now.strftime("%Y년 %m월 %d일")
+    updated = now.strftime("%Y-%m-%d %H:%M")
+
+    if not sections:
+        body = '<p class="empty">이번 주 새로운 소식이 없습니다.</p>'
+    else:
+        parts = []
+        for name, picks in sections:
+            rows = []
+            for it, summary in picks:
+                title = html.escape(it["title"])
+                link = html.escape(it["link"], quote=True)
+                summ = html.escape(summary)
+                src = (f'<span class="src">{html.escape(it["source"])}</span>'
+                       if it["source"] else "")
+                rows.append(
+                    f'<li><a href="{link}" target="_blank" rel="noopener">{title}</a>'
+                    f'<p>{summ}</p>{src}</li>'
+                )
+            parts.append(
+                f'<section><h2>{html.escape(name)}</h2>'
+                f'<ul>{"".join(rows)}</ul></section>'
+            )
+        body = "".join(parts)
+
+    page = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주간 관심 주제 업데이트</title>
+<style>
+:root {{ --accent:#2d6cdf; --bg:#f7f8fa; --card:#fff; --text:#1a1a1a;
+  --muted:#6b7280; --border:#e5e7eb; --summary:#374151; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:var(--bg); color:var(--text); line-height:1.6;
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif; }}
+.wrap {{ max-width:760px; margin:0 auto; padding:32px 20px 64px; }}
+header {{ margin-bottom:26px; }}
+h1 {{ font-size:1.55rem; margin:0 0 6px; }}
+.meta {{ color:var(--muted); font-size:0.9rem; }}
+section {{ background:var(--card); border:1px solid var(--border); border-radius:14px;
+  padding:20px 22px; margin-bottom:18px; }}
+h2 {{ font-size:1.15rem; margin:0 0 12px; }}
+ul {{ list-style:none; margin:0; padding:0; }}
+li {{ padding:14px 0; border-top:1px solid var(--border); }}
+li:first-child {{ border-top:none; padding-top:0; }}
+li a {{ color:var(--accent); text-decoration:none; font-weight:600; font-size:1.02rem; }}
+li a:hover {{ text-decoration:underline; }}
+li p {{ margin:6px 0 4px; color:var(--summary); }}
+.src {{ color:var(--muted); font-size:0.85rem; }}
+.empty {{ color:var(--muted); text-align:center; padding:48px 0; }}
+footer {{ text-align:center; color:var(--muted); font-size:0.8rem; margin-top:30px; }}
+@media (prefers-color-scheme:dark) {{
+  :root {{ --bg:#0f1115; --card:#181b20; --text:#e7e9ee; --muted:#9ca3af;
+    --border:#2a2e35; --accent:#5b9bff; --summary:#cbd5e1; }}
+}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>📰 주간 관심 주제 업데이트</h1>
+  <div class="meta">{date_label} · 마지막 갱신 {updated} KST</div>
+</header>
+{body}
+<footer>매주 목요일 자동 갱신 · 관심 주제 다이제스트</footer>
+</div>
+</body>
+</html>"""
+
+    os.makedirs("docs", exist_ok=True)
+    with open("docs/index.html", "w", encoding="utf-8") as f:
+        f.write(page)
+    print("docs/index.html 갱신 완료")
+
+
 # ---------- 메인 ----------
 def main():
     seen = set(json.loads(open(SEEN_FILE).read())) if os.path.exists(SEEN_FILE) else set()
@@ -355,6 +438,8 @@ def main():
         print(f"{len(sections)}개 주제 업로드 완료.")
     else:
         print("이번 주 업로드할 소식이 없습니다.")
+
+    write_html(sections)   # Slack과 별개로 웹페이지도 항상 갱신
 
     seen.update(posted)
     trimmed = sorted(seen)[-SEEN_LIMIT:]  # 목록 크기 제한
