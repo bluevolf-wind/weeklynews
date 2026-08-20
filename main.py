@@ -115,6 +115,9 @@ TRUSTED_SOURCES = {
     "prepared foods", "cosmetics & toiletries", "optometry times",
     "pharmaceutical technology", "news-medical", "american heart association",
     "usa today", "freep.com", "detroit free press", "glossy.co",
+    # 2차 추가 (dry-run 로그 검토 반영)
+    "바이오타임즈", "신아일보", "디트news24", "한경매거진", "뉴스웍스",
+    "이코노미사이언스", "네이트", "theplantbase",
     # 임상 (PubMed 항목은 항상 통과)
     "pubmed",
 }
