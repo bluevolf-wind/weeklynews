@@ -104,6 +104,17 @@ TRUSTED_SOURCES = {
     "fiercepharma", "fierce pharma", "endpoints", "pharmatimes", "pharmaphorum",
     "medscape", "healthline", "webmd", "sciencedaily", "medicalnewstoday",
     "the guardian", "new york times", "washington post", "ap news",
+    # 추가 국내 매체 (도메인 형태 포함 — 구글 뉴스가 도메인으로 줄 때 대비)
+    "dailypharm", "edaily", "kukinews", "seoulilbo", "etnews", "asiae",
+    "newswire.co.kr", "v.daum.net",
+    "서울일보", "아시아경제", "에너지경제신문", "오늘경제", "인더스트리뉴스",
+    "장업신문", "전자신문", "청년일보", "세종충청뉴스", "충청시사신문",
+    "푸드투데이", "한국공공정책신문",
+    # 해외 매체 (검증 완료 — 건기식·건강·식품 업계지 및 주요 일간지)
+    "supplyside", "newhope", "consumerlab", "chain drug review", "bevnet",
+    "prepared foods", "cosmetics & toiletries", "optometry times",
+    "pharmaceutical technology", "news-medical", "american heart association",
+    "usa today", "freep.com", "detroit free press", "glossy.co",
     # 임상 (PubMed 항목은 항상 통과)
     "pubmed",
 }
