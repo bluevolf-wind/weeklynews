@@ -76,6 +76,51 @@ TOPICS = [
 ]
 
 
+# ---------- 신뢰 매체 화이트리스트 ----------
+# 여기 있는 매체에서 온 기사만 통과시킴 (광고·협찬성 항목 차단).
+# 낯선 매체의 진짜 뉴스가 자꾸 걸러지면 아래 목록에 추가하세요.
+TRUSTED_SOURCES = {
+    # 국내 제약·의료·건강 전문지
+    "약업신문", "데일리팜", "팜뉴스", "히트뉴스", "메디파나", "메디파나뉴스",
+    "청년의사", "의학신문", "의협신문", "메디게이트", "메디게이트뉴스",
+    "데일리메디", "메디칼업저버", "청년의사신문", "약사공론", "헬스코리아",
+    "헬스코리아뉴스", "메디컬투데이", "쿠키뉴스", "라포르시안", "후생신보",
+    "메디컬월드", "약사신문", "메디컬타임즈", "메디컬타임스",
+    # 건강·식품
+    "헬스조선", "코메디닷컴", "하이닥", "식품음료신문", "식품저널",
+    "식품외식경제", "농민신문", "한국농어민신문",
+    # 통신·종합 일간지·경제지
+    "연합뉴스", "뉴스1", "뉴시스", "조선일보", "중앙일보", "동아일보",
+    "한겨레", "경향신문", "매일경제", "한국경제", "서울경제", "서울신문",
+    "국민일보", "세계일보", "한국일보", "문화일보", "이데일리", "머니투데이",
+    "아주경제", "파이낸셜뉴스", "헤럴드경제", "뉴스핌", "데일리안", "노컷뉴스",
+    "MBC", "KBS", "SBS", "YTN", "JTBC", "채널A", "MBN",
+    # 해외 업계지·매체
+    "nutraingredients", "nutraceuticals world", "nutraceuticalsworld",
+    "nutritioninsight", "nutrition insight", "nutritional outlook",
+    "natural products insider", "naturalproductsinsider", "foodnavigator",
+    "food navigator", "nutrition business journal", "vitafoods", "nutraceuticalbusiness",
+    "reuters", "bloomberg", "cnbc", "forbes", "statnews", "stat news",
+    "fiercepharma", "fierce pharma", "endpoints", "pharmatimes", "pharmaphorum",
+    "medscape", "healthline", "webmd", "sciencedaily", "medicalnewstoday",
+    "the guardian", "new york times", "washington post", "ap news",
+    # 임상 (PubMed 항목은 항상 통과)
+    "pubmed",
+}
+
+
+def _norm_source(s):
+    return re.sub(r"[\s.\-_()]+", "", s.lower())
+
+
+def is_trusted(source):
+    """출처가 신뢰 매체 목록에 있으면 True."""
+    if not source:
+        return False
+    ns = _norm_source(source)
+    return any(_norm_source(t) in ns for t in TRUSTED_SOURCES)
+
+
 # ---------- 수집 ----------
 def google_news(query, lang="en"):
     """Google News RSS로 최근 7일 뉴스 검색 (키 불필요)."""
@@ -97,29 +142,51 @@ def google_news(query, lang="en"):
         if r.status_code != 200:
             print(f"  ! 뉴스 요청 실패({query}): HTTP {r.status_code}")
             return []
-        feed = feedparser.parse(r.content)
     except Exception as e:
         print(f"  ! 뉴스 검색 오류({query}): {e}")
         return []
 
-    if not feed.entries:
-        print(f"  · '{query}' → 0건 (응답 {len(r.content)}바이트)")
-    else:
-        print(f"  · '{query}' → {len(feed.entries)}건")
+    # 응답이 진짜 RSS인지 확인 (봇 차단 시 오는 광고·안내 페이지를 걸러냄)
+    head = r.content[:600].lstrip().lower()
+    if not (head.startswith(b"<?xml") or b"<rss" in head or b"<feed" in head):
+        print(f"  ! '{query}' → RSS 아님(차단 의심, {len(r.content)}바이트) — 건너뜀")
+        return []
 
-    items = []
-    for e in feed.entries[:NEWS_PER_QUERY]:
+    feed = feedparser.parse(r.content)
+
+    items, bad_link, untrusted = [], 0, []
+    for e in feed.entries:
+        link = e.get("link", "")
+        # 1) 실제 구글 뉴스 기사 링크만 허용
+        if not link.startswith("https://news.google.com/"):
+            bad_link += 1
+            continue
         source = ""
         if "source" in e and hasattr(e.source, "get"):
             source = e.source.get("title", "")
+        # 2) 신뢰 매체에서 온 기사만 허용 (광고·협찬 차단)
+        if not is_trusted(source):
+            untrusted.append(source or "(출처없음)")
+            continue
         snippet = re.sub(r"<[^>]+>", "", e.get("summary", "")).strip()
         items.append({
             "title": e.get("title", "").strip(),
-            "link": e.get("link", ""),
+            "link": link,
             "source": source,
             "snippet": snippet[:300],
         })
+        if len(items) >= NEWS_PER_QUERY:
+            break
+
+    notes = []
+    if bad_link:
+        notes.append(f"비정상링크 {bad_link}건")
+    if untrusted:
+        notes.append(f"비신뢰출처 {len(untrusted)}건 제외 {sorted(set(untrusted))}")
+    note = f" ({', '.join(notes)})" if notes else ""
+    print(f"  · '{query}' → {len(items)}건{note}")
     return items
+
 
 
 def pubmed_recent(term):
