@@ -36,6 +36,8 @@ NEWS_PER_QUERY = 6          # 검색어당 가져올 뉴스 수
 MAX_ITEMS_PER_TOPIC = 12    # 주제당 Gemini에 넘길 후보 수
 SLACK_PICKS_PER_TOPIC = 5   # 주제당 Slack에 올릴 최종 수
 SEEN_LIMIT = 3000           # 중복방지 목록 최대 크기
+NEWS_DAYS = 8               # 뉴스 검색 기간(일)
+PUBMED_DAYS = 30            # 논문(PubMed) 검색 기간(일) — 뉴스보다 넉넉하게
 
 # ---------- 관심 주제 정의 ----------
 # name: 표시 이름 / news_ko·news_en: 뉴스 검색어 / pubmed: (선택) 임상 검색어
@@ -67,6 +69,12 @@ TOPICS = [
         "news_ko": ["빌베리 루테인", "루테인 임상"],
         "news_en": ["bilberry lutein eye health", "lutein clinical trial"],
         "pubmed": "(Bilberry OR Vaccinium myrtillus OR Lutein) AND (vision OR eye OR retina)",
+    },
+    {
+        "name": "베르가몬테 (Bergamonte / 베르가못)",
+        "news_ko": ["베르가몬테", "베르가못 추출물"],
+        "news_en": ["Bergamonte", "bergamot extract cholesterol", "Citrus bergamia"],
+        "pubmed": "(Citrus bergamia OR bergamot polyphenol) AND (cholesterol OR lipid OR metabolic OR cardiovascular)",
     },
     {
         "name": "🆕 새로운 건강기능식품 원료",
@@ -142,7 +150,7 @@ def google_news(query, lang="en"):
         base = "hl=ko&gl=KR&ceid=KR:ko"
     else:
         base = "hl=en-US&gl=US&ceid=US:en"
-    url = f"https://news.google.com/rss/search?q={quote(query)}+when:7d&{base}"
+    url = f"https://news.google.com/rss/search?q={quote(query)}+when:{NEWS_DAYS}d&{base}"
     # feedparser 기본 요청은 구글이 차단함 → 브라우저처럼 요청한 뒤 내용만 파싱
     headers = {
         "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -204,14 +212,14 @@ def google_news(query, lang="en"):
 
 
 def pubmed_recent(term):
-    """최근 8일 관련 임상·논문 (제목+초록 일부)."""
+    """최근 PUBMED_DAYS일 관련 임상·논문 (제목+초록 일부)."""
     common = {"tool": "topics-digest", "email": NCBI_EMAIL}
     try:
         r = requests.get(f"{EUTILS}/esearch.fcgi", params={
             **common, "db": "pubmed",
             "term": f"({term}) AND humans[MeSH Terms] AND English[Language]",
             "retmax": 6, "retmode": "json",
-            "datetype": "pdat", "reldate": 8, "sort": "date",
+            "datetype": "pdat", "reldate": PUBMED_DAYS, "sort": "date",
         }, timeout=30)
         r.raise_for_status()
         ids = r.json()["esearchresult"]["idlist"]
